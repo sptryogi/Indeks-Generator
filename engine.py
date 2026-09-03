@@ -234,7 +234,7 @@ def stamp_page_numbers(doc: "fitz.Document", page_size, margin, enabled: bool,
             x = W - mr - tw
         else:  # center
             x = (W - tw) / 2
-        page.insert_text((x, y), text, fontname="helv", fontsize=font_size, color=(0, 0, 0))
+        page.insert_text((x, y), text, fontname="helv", fontsize=font_size, color=(0, 0, 0, 1))
 
 
 # =====================================================================================
@@ -280,7 +280,7 @@ def render_index_pdf(
     if title_text:
         tw = fitz.get_text_length(title_text, fontname=title_fontname, fontsize=title_font_size)
         page.insert_text(((W - tw) / 2, mt + title_font_size), title_text,
-                          fontname=title_fontname, fontsize=title_font_size, color=(0, 0, 0))
+                          fontname=title_fontname, fontsize=title_font_size, color=(0, 0, 0, 1))
 
     col = 0
     y = content_top
@@ -307,7 +307,7 @@ def render_index_pdf(
         baseline = y + entry_font_size * 0.85
         line_text = f"{word}  {page_str}"
         page.insert_text((x0, baseline), line_text, fontname=entry_fontname,
-                          fontsize=entry_font_size, color=(0, 0, 0))
+                          fontsize=entry_font_size, color=(0, 0, 0, 1))
         y += entry_line_height
 
     stamp_page_numbers(doc, page_size, margin, page_number_enabled, page_number_position,
