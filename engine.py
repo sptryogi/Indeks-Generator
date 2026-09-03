@@ -115,8 +115,9 @@ def extract_entries(doc: "fitz.Document", font_keyword: str, size_min: float,
                     if len(spans) < 2 or "Type3" not in spans[1]["font"]:
                         continue
                 word = clean_word(s0["text"])
+                word_display = s0["text"].strip()  # versi asli, titik suku kata TETAP ada
                 if word:
-                    entries.append((word, label))
+                    entries.append((word, label, word_display))
     return entries
 
 
@@ -143,18 +144,20 @@ def is_sublema(word_clean: str, prefixes, suffixes, min_root_length: int) -> boo
 
 def sort_key(word: str) -> str:
     """Kunci pengurutan abjad: huruf kecil, tanpa diakritik (é -> e), tanpa tanda hubung."""
-    nfkd = unicodedata.normalize("NFKD", word.lower().replace("-", ""))
+    nfkd = unicodedata.normalize("NFKD", word.lower().replace("-", "").replace(".", ""))
     return "".join(c for c in nfkd if not unicodedata.combining(c))
 
 
 def build_index(entries, only_sublema: bool, prefixes, suffixes, min_root_length: int):
     grouped = {}
-    for word, label in entries:
+    display_map = {}
+    for word, label, word_display in entries:
         if only_sublema and not is_sublema(word, prefixes, suffixes, min_root_length):
             continue
         grouped.setdefault(word, [])
         if label not in grouped[word]:
             grouped[word].append(label)
+        display_map.setdefault(word, word_display)  # simpan versi ber-titik pertama kali ketemu
 
     def label_sort_key(lbl):
         try:
@@ -165,7 +168,7 @@ def build_index(entries, only_sublema: bool, prefixes, suffixes, min_root_length
     items = []
     for word, labels in grouped.items():
         labels_sorted = sorted(labels, key=label_sort_key)
-        items.append((word, labels_sorted))
+        items.append((display_map[word], labels_sorted))  # teks yang dirender = versi ber-titik
     items.sort(key=lambda item: sort_key(item[0]))
     return items
 
@@ -228,12 +231,14 @@ def render_index_pdf(
     margin=(42, 56, 42, 56),
     title_text="INDEKS SUBLEMA",
     title_font="Arial (Helvetica)",
-    title_font_size=14,
+    title_font_size=12,
     title_bold=True,
     entry_font="Arial (Helvetica)",
-    entry_font_size=10,
+    entry_font_size=8,
     entry_bold=False,
     line_height_ratio=1.45,
+    num_columns=3,
+    column_gap=18,
     page_number_enabled=True,
     page_number_position="bottom-center",
     page_number_format="arabic",
@@ -246,7 +251,8 @@ def render_index_pdf(
     ml, mt, mr, mb = margin
     content_top = mt + (title_font_size * 2.2 if title_text else 0)
     content_bottom = H - mb
-    col_width = W - ml - mr  # 1 kolom penuh, tanpa pembagian kolom
+    num_columns = max(1, int(num_columns))
+    col_width = (W - ml - mr - column_gap * (num_columns - 1)) / num_columns
 
     entry_line_height = entry_font_size * line_height_ratio
     entry_fontname = FONT_BASE14[entry_font][entry_bold]
@@ -260,19 +266,32 @@ def render_index_pdf(
         page.insert_text(((W - tw) / 2, mt + title_font_size), title_text,
                           fontname=title_fontname, fontsize=title_font_size, color=(0, 0, 0))
 
+    col = 0
     y = content_top
+
+    def col_x():
+        return ml + col * (col_width + column_gap)
+
+    def new_column_or_page():
+        nonlocal col, y, page
+        col += 1
+        if col >= num_columns:
+            col = 0
+            page = doc.new_page(width=W, height=H)
+            y = mt
+        else:
+            y = content_top if page.number == 0 else mt
 
     for word, labels in index_items:
         if y + entry_line_height > content_bottom:
-            page = doc.new_page(width=W, height=H)
-            y = mt
+            new_column_or_page()
 
         page_str = ", ".join(labels)
         word_w = fitz.get_text_length(word, fontname=entry_fontname, fontsize=entry_font_size)
         num_w = fitz.get_text_length(page_str, fontname=entry_fontname, fontsize=entry_font_size)
         dot_w = fitz.get_text_length(".", fontname=entry_fontname, fontsize=entry_font_size)
 
-        x0 = ml
+        x0 = col_x()
         baseline = y + entry_font_size * 0.85
         page.insert_text((x0, baseline), word, fontname=entry_fontname,
                           fontsize=entry_font_size, color=(0, 0, 0))
