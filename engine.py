@@ -117,7 +117,7 @@ def extract_entries(doc: "fitz.Document", font_keyword: str, size_min: float,
                 word = clean_word(s0["text"])
                 word_display = s0["text"].strip()  # versi asli, titik suku kata TETAP ada
                 if word:
-                    entries.append((word, label, word_display))
+                    entries.append((word, label, word_display, s0["bbox"][0]))  # + indent (x kiri)
     return entries
 
 
@@ -147,12 +147,28 @@ def sort_key(word: str) -> str:
     nfkd = unicodedata.normalize("NFKD", word.lower().replace("-", "").replace(".", ""))
     return "".join(c for c in nfkd if not unicodedata.combining(c))
 
-
+def indented_x_values(x0_iterable, indent_max: float = 25.0):
+    """Kembalikan himpunan nilai x0 yang tergolong 'menjorok' (Sublema),
+    dibandingkan terhadap basis kolom (Lema) terdekat di sebelah kirinya.
+    Lebih akurat daripada menebak dari awalan/akhiran kata."""
+    uniq = sorted(set(round(x, 1) for x in x0_iterable))
+    bases = []
+    sublema_x = set()
+    for x in uniq:
+        near_base = next((b for b in bases if 0 < x - b <= indent_max), None)
+        if near_base is not None:
+            sublema_x.add(x)
+        else:
+            bases.append(x)
+    return sublema_x
+    
 def build_index(entries, only_sublema: bool, prefixes, suffixes, min_root_length: int):
+    sublema_x = indented_x_values(x for (_, _, _, x) in entries)
+
     grouped = {}
     display_map = {}
-    for word, label, word_display in entries:
-        if only_sublema and not is_sublema(word, prefixes, suffixes, min_root_length):
+    for word, label, word_display, indent in entries:
+        if only_sublema and round(indent, 1) not in sublema_x:
             continue
         grouped.setdefault(word, [])
         if label not in grouped[word]:
