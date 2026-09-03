@@ -58,7 +58,7 @@ with st.sidebar:
                                            value=8, step=1, key="entry_size")
     entry_bold = st.checkbox("Daftar tebal (bold)", value=False, key="entry_bold")
     num_columns = st.number_input("Jumlah kolom", min_value=1, max_value=4,
-                                   value=3, step=1, key="num_columns",
+                                   value=4, step=1, key="num_columns",
                                    help="Jumlah kolom daftar sublema per halaman.")
 
     st.divider()
