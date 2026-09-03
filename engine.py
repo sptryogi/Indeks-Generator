@@ -287,24 +287,11 @@ def render_index_pdf(
             new_column_or_page()
 
         page_str = ", ".join(labels)
-        word_w = fitz.get_text_length(word, fontname=entry_fontname, fontsize=entry_font_size)
-        num_w = fitz.get_text_length(page_str, fontname=entry_fontname, fontsize=entry_font_size)
-        dot_w = fitz.get_text_length(".", fontname=entry_fontname, fontsize=entry_font_size)
-
         x0 = col_x()
         baseline = y + entry_font_size * 0.85
-        page.insert_text((x0, baseline), word, fontname=entry_fontname,
+        line_text = f"{word}  {page_str}"
+        page.insert_text((x0, baseline), line_text, fontname=entry_fontname,
                           fontsize=entry_font_size, color=(0, 0, 0))
-
-        avail = col_width - word_w - num_w - 8
-        n_dots = max(1, int(avail / dot_w)) if dot_w > 0 and avail > dot_w else 0
-        if n_dots > 0:
-            dots = "." * n_dots
-            page.insert_text((x0 + word_w + 3, baseline), dots, fontname=entry_fontname,
-                              fontsize=entry_font_size, color=(0.45, 0.45, 0.45))
-
-        page.insert_text((x0 + col_width - num_w, baseline), page_str,
-                          fontname=entry_fontname, fontsize=entry_font_size, color=(0, 0, 0))
         y += entry_line_height
 
     stamp_page_numbers(doc, page_size, margin, page_number_enabled, page_number_position,
