@@ -45,7 +45,7 @@ with st.sidebar:
         title_font = st.selectbox("Font judul", FONT_CHOICES, index=0, key="title_font")
     with c2:
         title_font_size = st.number_input("Ukuran judul", min_value=6, max_value=48,
-                                           value=14, step=1, key="title_size")
+                                           value=12, step=1, key="title_size")
     title_bold = st.checkbox("Judul tebal (bold)", value=True, key="title_bold")
 
     st.divider()
@@ -55,8 +55,11 @@ with st.sidebar:
         entry_font = st.selectbox("Font daftar", FONT_CHOICES, index=0, key="entry_font")
     with c4:
         entry_font_size = st.number_input("Ukuran daftar", min_value=6, max_value=24,
-                                           value=10, step=1, key="entry_size")
+                                           value=8, step=1, key="entry_size")
     entry_bold = st.checkbox("Daftar tebal (bold)", value=False, key="entry_bold")
+    num_columns = st.number_input("Jumlah kolom", min_value=1, max_value=4,
+                                   value=3, step=1, key="num_columns",
+                                   help="Jumlah kolom daftar sublema per halaman.")
 
     st.divider()
     st.subheader("Penomoran halaman")
@@ -201,6 +204,7 @@ output_pdf_bytes = render_index_pdf(
     entry_font=entry_font,
     entry_font_size=entry_font_size,
     entry_bold=entry_bold,
+    num_columns=num_columns,
     page_number_enabled=page_number_enabled,
     page_number_position=pn_position,
     page_number_format=pn_format,
