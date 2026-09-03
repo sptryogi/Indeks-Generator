@@ -13,6 +13,7 @@ penomoran halaman semuanya bisa diatur lewat sidebar.
 
 import fitz  # PyMuPDF
 import streamlit as st
+import io
 
 from engine import (
     FONT_CHOICES,
@@ -213,6 +214,22 @@ output_pdf_bytes = render_index_pdf(
     page_number_prefix=page_number_prefix,
     page_number_suffix=page_number_suffix,
 )
+import pikepdf
+
+def add_cmyk_output_intent(pdf_bytes: bytes) -> bytes:
+    pdf = pikepdf.open(io.BytesIO(pdf_bytes))
+    oi = pdf.make_indirect(pikepdf.Dictionary({
+        "/Type": pikepdf.Name("/OutputIntent"),
+        "/S": pikepdf.Name("/GTS_PDFX"),
+        "/OutputConditionIdentifier": pikepdf.String("CGATS TR 001 (SWOP)"),
+        "/Info": pikepdf.String("U.S. Web Coated (SWOP) v2"),
+    }))
+    pdf.Root.OutputIntents = pikepdf.Array([oi])
+    buf = io.BytesIO()
+    pdf.save(buf)
+    return buf.getvalue()
+
+output_pdf_bytes = add_cmyk_output_intent(output_pdf_bytes)
 
 st.success("✅ Indeks sublema berhasil dibuat.")
 
