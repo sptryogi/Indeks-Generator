@@ -328,15 +328,24 @@ import os
 import shutil
 import subprocess
 import tempfile
+import time
 
 
 def is_ghostscript_available() -> bool:
     return shutil.which("gs") is not None
 
 
-def convert_pdf_to_cmyk(pdf_bytes: bytes) -> bytes:
+def convert_pdf_to_cmyk(pdf_bytes: bytes, timeout: int = 900, progress_callback=None) -> bytes:
     """Konversi semua warna (teks, vektor, gambar) dalam PDF dari RGB ke CMYK
-    memakai Ghostscript, sesuai warna asli yang ada di PDF tersebut."""
+    memakai Ghostscript, sesuai warna asli yang ada di PDF tersebut.
+
+    timeout: batas waktu total dalam detik (default 900 = 15 menit — PDF banyak
+        halaman/font kompleks seperti aksara Sunda bisa butuh waktu lebih lama
+        dari dugaan, terutama di server dengan CPU terbatas).
+    progress_callback: fungsi opsional dipanggil dengan nomor halaman (int)
+        setiap kali Ghostscript selesai memproses satu halaman, misal untuk
+        mengisi progress bar di UI.
+    """
     if not is_ghostscript_available():
         raise RuntimeError(
             "Ghostscript ('gs') tidak ditemukan di server. Di Streamlit Community "
@@ -359,8 +368,30 @@ def convert_pdf_to_cmyk(pdf_bytes: bytes) -> bytes:
             f"-sOutputFile={out_path}",
             in_path,
         ]
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
-        if result.returncode != 0 or not os.path.exists(out_path):
-            raise RuntimeError(f"Ghostscript gagal (kode {result.returncode}):\n{result.stderr[-2000:]}")
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                 text=True, bufsize=1)
+        start = time.time()
+        log_tail = []
+        for line in proc.stdout:
+            line = line.strip()
+            if line:
+                log_tail.append(line)
+                log_tail = log_tail[-30:]
+            if line.startswith("Page ") and progress_callback:
+                try:
+                    progress_callback(int(line.split()[1]))
+                except (IndexError, ValueError):
+                    pass
+            if time.time() - start > timeout:
+                proc.kill()
+                proc.wait(timeout=10)
+                raise RuntimeError(
+                    f"Konversi melebihi batas waktu {timeout} detik (PDF terlalu besar/"
+                    f"kompleks untuk waktu yang tersedia). Coba naikkan nilai timeout, "
+                    f"atau proses PDF dalam potongan halaman yang lebih kecil."
+                )
+        proc.wait(timeout=15)
+        if proc.returncode != 0 or not os.path.exists(out_path):
+            raise RuntimeError(f"Ghostscript gagal (kode {proc.returncode}):\n" + "\n".join(log_tail))
         with open(out_path, "rb") as f:
             return f.read()
