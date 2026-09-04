@@ -58,9 +58,15 @@ with st.sidebar:
         entry_font_size = st.number_input("Ukuran daftar", min_value=6, max_value=24,
                                            value=8, step=1, key="entry_size")
     entry_bold = st.checkbox("Daftar tebal (bold)", value=False, key="entry_bold")
-    num_columns = st.number_input("Jumlah kolom", min_value=1, max_value=4,
-                                   value=4, step=1, key="num_columns",
-                                   help="Jumlah kolom daftar sublema per halaman.")
+    layout_mode = st.radio(
+        "Tata letak",
+        ["4 Kolom", "Baris (alur kiri ke kanan, penuh lebar)"],
+        index=0, key="layout_mode",
+        help="'Baris' membentang penuh selebar halaman — entri mengalir kiri ke "
+             "kanan dan pindah baris otomatis, cocok kalau kolom sempit sering "
+             "bikin kata+halaman kepanjangan tumpang tindih.",
+    )
+    num_columns = 4 if layout_mode == "4 Kolom" else 1
 
     st.divider()
     st.subheader("Header abjad (A, B, C, ...)")
