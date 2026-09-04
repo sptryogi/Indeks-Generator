@@ -63,6 +63,18 @@ with st.sidebar:
                                    help="Jumlah kolom daftar sublema per halaman.")
 
     st.divider()
+    st.subheader("Header abjad (A, B, C, ...)")
+    letter_header_enabled = st.checkbox("Tampilkan header abjad", value=True, key="lh_enabled")
+    c_lh1, c_lh2 = st.columns(2)
+    with c_lh1:
+        letter_header_font = st.selectbox("Font header", FONT_CHOICES, index=0, key="lh_font")
+    with c_lh2:
+        letter_header_font_size = st.number_input("Ukuran header", min_value=6, max_value=48,
+                                                    value=13, step=1, key="lh_size")
+    letter_header_bold = st.checkbox("Header tebal (bold)", value=True, key="lh_bold")
+
+    
+    st.divider()
     st.subheader("Penomoran halaman")
     page_number_enabled = st.checkbox("Tampilkan nomor halaman", value=True, key="pn_enabled")
     position_label = st.selectbox(
@@ -206,6 +218,10 @@ output_pdf_bytes = render_index_pdf(
     entry_font_size=entry_font_size,
     entry_bold=entry_bold,
     num_columns=num_columns,
+    letter_header_enabled=letter_header_enabled,
+    letter_header_font=letter_header_font,
+    letter_header_font_size=letter_header_font_size,
+    letter_header_bold=letter_header_bold,
     page_number_enabled=page_number_enabled,
     page_number_position=pn_position,
     page_number_format=pn_format,
