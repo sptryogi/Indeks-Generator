@@ -11,6 +11,7 @@ import unicodedata
 from collections import Counter
 import re
 import pikepdf
+import io
 
 import fitz  # PyMuPDF
 
