@@ -9,6 +9,7 @@ import time
 
 import fitz  # PyMuPDF
 import streamlit as st
+import io
 
 from engine import convert_pdf_to_cmyk, is_ghostscript_available
 
