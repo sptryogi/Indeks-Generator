@@ -188,6 +188,19 @@ def build_index(entries, only_sublema: bool, prefixes, suffixes, min_root_length
     items.sort(key=lambda item: sort_key(item[0]))
     return items
 
+def build_letter_groups(index_items):
+    """Kelompokkan item indeks (yang sudah terurut abjad) berdasarkan huruf
+    pertama (tanpa diakritik/tanda hubung), untuk header A/B/C/... ."""
+    groups = []
+    current_letter = None
+    for word, labels in index_items:
+        key = sort_key(word)
+        letter = key[0].upper() if key else "#"
+        if letter != current_letter:
+            groups.append((letter, []))
+            current_letter = letter
+        groups[-1][1].append((word, labels))
+    return groups
 
 # =====================================================================================
 # 3) PENOMORAN HALAMAN (ROMAWI / ANGKA, 6 POSISI)
@@ -255,6 +268,13 @@ def render_index_pdf(
     line_height_ratio=1.45,
     num_columns=3,
     column_gap=18,
+    entry_separator=", ",
+    letter_header_enabled=True,
+    letter_header_font="Arial (Helvetica)",
+    letter_header_font_size=13,
+    letter_header_bold=True,
+    letter_header_gap_before=10,
+    letter_header_gap_after=4,
     page_number_enabled=True,
     page_number_position="bottom-center",
     page_number_format="arabic",
@@ -271,8 +291,10 @@ def render_index_pdf(
     col_width = (W - ml - mr - column_gap * (num_columns - 1)) / num_columns
 
     entry_line_height = entry_font_size * line_height_ratio
+    header_line_height = letter_header_font_size * line_height_ratio
     entry_fontname = FONT_BASE14[entry_font][entry_bold]
     title_fontname = FONT_BASE14[title_font][title_bold]
+    header_fontname = FONT_BASE14[letter_header_font][letter_header_bold]
 
     doc = fitz.open()
     page = doc.new_page(width=W, height=H)
@@ -284,12 +306,16 @@ def render_index_pdf(
 
     col = 0
     y = content_top
+    x = ml
 
-    def col_x():
+    def col_left():
         return ml + col * (col_width + column_gap)
 
+    def col_right():
+        return col_left() + col_width
+
     def new_column_or_page():
-        nonlocal col, y, page
+        nonlocal col, y, page, x
         col += 1
         if col >= num_columns:
             col = 0
@@ -297,18 +323,47 @@ def render_index_pdf(
             y = mt
         else:
             y = content_top if page.number == 0 else mt
+        x = col_left()
 
-    for word, labels in index_items:
-        if y + entry_line_height > content_bottom:
+    def ensure_space(height):
+        nonlocal y
+        if y + height > content_bottom:
             new_column_or_page()
 
-        page_str = ", ".join(labels)
-        x0 = col_x()
-        baseline = y + entry_font_size * 0.85
-        line_text = f"{word}  {page_str}"
-        page.insert_text((x0, baseline), line_text, fontname=entry_fontname,
-                          fontsize=entry_font_size, color=(0, 0, 0, 1))
-        y += entry_line_height
+    groups = build_letter_groups(index_items)
+
+    for letter, items in groups:
+        # header + minimal 1 baris entri harus muat, kalau tidak -> pindah
+        # kolom/halaman dulu supaya header tidak "menggantung" sendirian
+        needed = (header_line_height + letter_header_gap_after if letter_header_enabled else 0) + entry_line_height
+        ensure_space(needed)
+
+        if letter_header_enabled:
+            y += letter_header_gap_before
+            page.insert_text((col_left(), y + letter_header_font_size * 0.85), letter,
+                              fontname=header_fontname, fontsize=letter_header_font_size,
+                              color=(0, 0, 0, 1))
+            y += header_line_height + letter_header_gap_after
+
+        x = col_left()
+        for i, (word, labels) in enumerate(items):
+            page_str = ", ".join(labels)
+            token = f"{word} {page_str}"
+            suffix = entry_separator if i < len(items) - 1 else ""
+            token_full = token + suffix
+            tw = fitz.get_text_length(token_full, fontname=entry_fontname, fontsize=entry_font_size)
+
+            if x > col_left() and x + tw > col_right():
+                x = col_left()
+                y += entry_line_height
+                ensure_space(entry_line_height)
+
+            baseline = y + entry_font_size * 0.85
+            page.insert_text((x, baseline), token_full, fontname=entry_fontname,
+                              fontsize=entry_font_size, color=(0, 0, 0, 1))
+            x += tw
+
+        y += entry_line_height  # jarak sebelum grup huruf berikutnya
 
     stamp_page_numbers(doc, page_size, margin, page_number_enabled, page_number_position,
                         page_number_format, page_number_start, page_number_font_size,
@@ -364,6 +419,7 @@ def convert_pdf_to_cmyk(pdf_bytes: bytes, timeout: int = 900, progress_callback=
             "-sColorConversionStrategy=CMYK",
             "-dProcessColorModel=/DeviceCMYK",
             "-dOverrideICC=true",
+            "-dUseFastColor=true",   # <-- BARU: paksa RGB netral (hitam) jadi K-only, bukan rich black
             "-dAutoRotatePages=/None",
             f"-sOutputFile={out_path}",
             in_path,
