@@ -91,7 +91,13 @@ def get_font_size_combinations(pdf_bytes: bytes, page_index: int = 0, limit: int
         rows.append({"font": font, "ukuran": size, "jumlah": count, "contoh": samples[key]})
     return rows
 
+# Rentang Unicode aksara Sunda — dipakai untuk verifikasi "diikuti aksara Sunda"
+SUNDANESE_UNICODE_RANGES = ((0x1B80, 0x1BBF), (0x1CC0, 0x1CCF))
 
+
+def contains_sundanese_script(text: str) -> bool:
+    return any(lo <= ord(ch) <= hi for ch in text for lo, hi in SUNDANESE_UNICODE_RANGES)
+    
 def extract_entries(doc: "fitz.Document", font_keyword: str, size_min: float,
                      size_max: float, require_script_after: bool):
     """Kembalikan list (kata_bersih, label_halaman) untuk tiap entri kamus terdeteksi."""
@@ -112,7 +118,7 @@ def extract_entries(doc: "fitz.Document", font_keyword: str, size_min: float,
                 if not (size_min <= s0["size"] <= size_max):
                     continue
                 if require_script_after:
-                    if len(spans) < 2 or "Type3" not in spans[1]["font"]:
+                    if len(spans) < 2 or not contains_sundanese_script(spans[1]["text"]):
                         continue
                 word = clean_word(s0["text"])
                 word_display = s0["text"].strip()  # versi asli, titik suku kata TETAP ada
