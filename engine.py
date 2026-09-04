@@ -317,3 +317,50 @@ def render_index_pdf(
     pdf_bytes = doc.tobytes()
     doc.close()
     return pdf_bytes
+
+
+# =====================================================================================
+# 5) KONVERSI PDF RGB -> CMYK (Ghostscript — konversi warna sungguhan di content
+#    stream: rg/RG -> k/K, BUKAN sekadar menambah tag OutputIntent)
+# =====================================================================================
+
+import os
+import shutil
+import subprocess
+import tempfile
+
+
+def is_ghostscript_available() -> bool:
+    return shutil.which("gs") is not None
+
+
+def convert_pdf_to_cmyk(pdf_bytes: bytes) -> bytes:
+    """Konversi semua warna (teks, vektor, gambar) dalam PDF dari RGB ke CMYK
+    memakai Ghostscript, sesuai warna asli yang ada di PDF tersebut."""
+    if not is_ghostscript_available():
+        raise RuntimeError(
+            "Ghostscript ('gs') tidak ditemukan di server. Di Streamlit Community "
+            "Cloud: tambahkan file packages.txt berisi baris 'ghostscript' di root "
+            "repo lalu deploy ulang. Lokal: 'sudo apt install ghostscript' (Linux), "
+            "'brew install ghostscript' (Mac), atau unduh dari ghostscript.com (Windows)."
+        )
+    with tempfile.TemporaryDirectory() as tmp:
+        in_path = os.path.join(tmp, "in.pdf")
+        out_path = os.path.join(tmp, "out.pdf")
+        with open(in_path, "wb") as f:
+            f.write(pdf_bytes)
+        cmd = [
+            "gs", "-dNOPAUSE", "-dBATCH", "-dSAFER",
+            "-sDEVICE=pdfwrite",
+            "-sColorConversionStrategy=CMYK",
+            "-dProcessColorModel=/DeviceCMYK",
+            "-dOverrideICC=true",
+            "-dAutoRotatePages=/None",
+            f"-sOutputFile={out_path}",
+            in_path,
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
+        if result.returncode != 0 or not os.path.exists(out_path):
+            raise RuntimeError(f"Ghostscript gagal (kode {result.returncode}):\n{result.stderr[-2000:]}")
+        with open(out_path, "rb") as f:
+            return f.read()
