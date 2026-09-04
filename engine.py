@@ -9,6 +9,8 @@ Streamlit, sehingga bisa dites/dipakai ulang secara terpisah dari UI.
 
 import unicodedata
 from collections import Counter
+import re
+import pikepdf
 
 import fitz  # PyMuPDF
 
@@ -364,6 +366,27 @@ def render_index_pdf(
                 y += entry_line_height
                 ensure_space(entry_line_height)
 
+            if tw > col_width:
+                # Entri sendirian lebih lebar dari kolom (kata + halaman kepanjangan) —
+                # pecah jadi 2 baris (kata / nomor halaman) supaya TIDAK tumpang tindih
+                # ke kolom sebelah, alih-alih dipaksa satu baris.
+                if x > col_left():
+                    x = col_left()
+                    y += entry_line_height
+                    ensure_space(entry_line_height)
+                baseline = y + entry_font_size * 0.85
+                page.insert_text((x, baseline), word + " ", fontname=entry_fontname,
+                                  fontsize=entry_font_size, color=(0, 0, 0, 1))
+                y += entry_line_height
+                ensure_space(entry_line_height)
+                num_part = page_str + suffix
+                baseline = y + entry_font_size * 0.85
+                page.insert_text((col_left() + 8, baseline), num_part, fontname=entry_fontname,
+                                  fontsize=entry_font_size, color=(0, 0, 0, 1))
+                x = col_left() + 8 + fitz.get_text_length(
+                    num_part, fontname=entry_fontname, fontsize=entry_font_size)
+                continue
+
             baseline = y + entry_font_size * 0.85
             page.insert_text((x, baseline), token_full, fontname=entry_fontname,
                               fontsize=entry_font_size, color=(0, 0, 0, 1))
@@ -395,6 +418,32 @@ import time
 def is_ghostscript_available() -> bool:
     return shutil.which("gs") is not None
 
+def _apply_full_gcr(pdf_bytes: bytes) -> bytes:
+    """Pasca-proses: pindahkan komponen abu-abu bersama dari C/M/Y ke K
+    (Full Gray Component Replacement). Ini mengubah 'rich black' bawaan
+    Ghostscript (mis. 0.72 0.68 0.67 0.88 k) menjadi nyaris pure K
+    (mis. 0.05 0.00 0.00 1.00 k), tanpa mengubah warna asli lain."""
+    pattern = re.compile(rb'([\d.]+)\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)\s+([kK])\b')
+
+    def repl(m):
+        c, mm, y, k = (float(m.group(i)) for i in range(1, 5))
+        gray = min(c, mm, y)
+        c2, m2, y2 = c - gray, mm - gray, y - gray
+        k2 = min(1.0, k + gray)
+        return f"{c2:.4f} {m2:.4f} {y2:.4f} {k2:.4f} ".encode() + m.group(5)
+
+    pdf = pikepdf.open(io.BytesIO(pdf_bytes))
+    for page in pdf.pages:
+        contents = page.obj.Contents
+        if isinstance(contents, pikepdf.Array):
+            buf = b"\n".join(bytes(s.read_bytes()) for s in contents)
+        else:
+            buf = bytes(contents.read_bytes())
+        page.obj.Contents = pdf.make_stream(pattern.sub(repl, buf))
+
+    out = io.BytesIO()
+    pdf.save(out)
+    return out.getvalue()
 
 def convert_pdf_to_cmyk(pdf_bytes: bytes, timeout: int = 900, progress_callback=None) -> bytes:
     """Konversi semua warna (teks, vektor, gambar) dalam PDF dari RGB ke CMYK
@@ -425,7 +474,6 @@ def convert_pdf_to_cmyk(pdf_bytes: bytes, timeout: int = 900, progress_callback=
             "-sColorConversionStrategy=CMYK",
             "-dProcessColorModel=/DeviceCMYK",
             "-dOverrideICC=true",
-            "-dUseFastColor=true",   # <-- BARU: paksa RGB netral (hitam) jadi K-only, bukan rich black
             "-dAutoRotatePages=/None",
             f"-sOutputFile={out_path}",
             in_path,
@@ -456,4 +504,5 @@ def convert_pdf_to_cmyk(pdf_bytes: bytes, timeout: int = 900, progress_callback=
         if proc.returncode != 0 or not os.path.exists(out_path):
             raise RuntimeError(f"Ghostscript gagal (kode {proc.returncode}):\n" + "\n".join(log_tail))
         with open(out_path, "rb") as f:
-            return f.read()
+            cmyk_bytes = f.read()
+        return _apply_full_gcr(cmyk_bytes)
