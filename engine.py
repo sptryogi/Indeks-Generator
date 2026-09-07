@@ -277,7 +277,7 @@ def render_index_pdf(
     line_height_ratio=1.45,
     num_columns=3,
     column_gap=18,
-    entry_separator=", ",
+    entry_separator=",  ",
     justify_entries=True,
     letter_header_enabled=True,
     letter_header_font="Arial (Helvetica)",
@@ -369,6 +369,8 @@ def render_index_pdf(
         # 1) siapkan tiap entri jadi "chunk" siap gambar. Kalau satu entri saja
         # sudah lebih lebar dari kolom, kecilkan ukuran hurufnya SUPAYA PAS —
         # ini menjamin tidak akan pernah tumpang tindih ke kolom sebelah.
+        SAFETY_GAP = max(1.5, entry_font_size * 0.15)  # jarak jaga-jaga antar-entri (pt)
+
         prepared = []
         for i, (word, labels) in enumerate(items):
             page_str = ", ".join(labels)
@@ -379,6 +381,8 @@ def render_index_pdf(
             if tw > col_width:
                 fsize = entry_font_size * (col_width / tw) * 0.98
                 tw = col_width * 0.98
+            else:
+                tw += SAFETY_GAP
             prepared.append((text, tw, fsize))
 
         # 2) susun jadi baris-baris; total lebar per baris DIJAMIN <= col_width
@@ -438,11 +442,22 @@ def _apply_full_gcr(pdf_bytes: bytes) -> bytes:
     (mis. 0.05 0.00 0.00 1.00 k), tanpa mengubah warna asli lain."""
     pattern = re.compile(rb'([\d.]+)\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)\s+([kK])\b')
 
+    NEAR_BLACK_K = 0.90   # ambang K minimal supaya dianggap "ini hitam"
+    NEAR_ZERO_CMY = 0.06  # ambang sisa C/M/Y maksimal supaya dianggap "noise", bukan warna sungguhan
+
     def repl(m):
         c, mm, y, k = (float(m.group(i)) for i in range(1, 5))
         gray = min(c, mm, y)
         c2, m2, y2 = c - gray, mm - gray, y - gray
         k2 = min(1.0, k + gray)
+
+        # Snap ke hitam murni HANYA kalau K sudah dominan dan sisa C/M/Y kecil
+        # sekali (noise konversi ICC) — warna asli seperti magenta/kuning tidak
+        # akan pernah lolos kedua syarat ini sekaligus, jadi aman tidak terpengaruh.
+        if k2 >= NEAR_BLACK_K and c2 <= NEAR_ZERO_CMY and m2 <= NEAR_ZERO_CMY and y2 <= NEAR_ZERO_CMY:
+            c2 = m2 = y2 = 0.0
+            k2 = 1.0
+
         return f"{c2:.4f} {m2:.4f} {y2:.4f} {k2:.4f} ".encode() + m.group(5)
 
     pdf = pikepdf.open(io.BytesIO(pdf_bytes))
