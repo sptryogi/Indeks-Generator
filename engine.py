@@ -342,9 +342,20 @@ def render_index_pdf(
 
     groups = build_letter_groups(index_items)
 
+    def draw_line(chunks, line_y, extra_gap=0.0):
+        """Gambar satu baris dari nol di col_left(). chunks = list of
+        (text, width, fontsize). extra_gap disisipkan di ANTARA tiap chunk
+        untuk efek justify (rata kanan-kiri)."""
+        cx = col_left()
+        baseline = line_y + entry_font_size * 0.85
+        for idx, (text, w, fsize) in enumerate(chunks):
+            page.insert_text((cx, baseline), text, fontname=entry_fontname,
+                              fontsize=fsize, color=(0, 0, 0, 1))
+            cx += w
+            if idx < len(chunks) - 1:
+                cx += extra_gap
+
     for letter, items in groups:
-        # header + minimal 1 baris entri harus muat, kalau tidak -> pindah
-        # kolom/halaman dulu supaya header tidak "menggantung" sendirian
         needed = (header_line_height + letter_header_gap_after if letter_header_enabled else 0) + entry_line_height
         ensure_space(needed)
 
@@ -355,44 +366,44 @@ def render_index_pdf(
                               color=(0, 0, 0, 1))
             y += header_line_height + letter_header_gap_after
 
-        x = col_left()
+        # 1) siapkan tiap entri jadi "chunk" siap gambar. Kalau satu entri saja
+        # sudah lebih lebar dari kolom, kecilkan ukuran hurufnya SUPAYA PAS —
+        # ini menjamin tidak akan pernah tumpang tindih ke kolom sebelah.
+        prepared = []
         for i, (word, labels) in enumerate(items):
             page_str = ", ".join(labels)
-            token = f"{word} {page_str}"
             suffix = entry_separator if i < len(items) - 1 else ""
-            token_full = token + suffix
-            tw = fitz.get_text_length(token_full, fontname=entry_fontname, fontsize=entry_font_size)
-
-            if x > col_left() and x + tw > col_right():
-                x = col_left()
-                y += entry_line_height
-                ensure_space(entry_line_height)
-
+            text = f"{word} {page_str}{suffix}"
+            tw = fitz.get_text_length(text, fontname=entry_fontname, fontsize=entry_font_size)
+            fsize = entry_font_size
             if tw > col_width:
-                # Entri sendirian lebih lebar dari kolom (kata + halaman kepanjangan) —
-                # pecah jadi 2 baris (kata / nomor halaman) supaya TIDAK tumpang tindih
-                # ke kolom sebelah, alih-alih dipaksa satu baris.
-                if x > col_left():
-                    x = col_left()
-                    y += entry_line_height
-                    ensure_space(entry_line_height)
-                baseline = y + entry_font_size * 0.85
-                page.insert_text((x, baseline), word + " ", fontname=entry_fontname,
-                                  fontsize=entry_font_size, color=(0, 0, 0, 1))
-                y += entry_line_height
-                ensure_space(entry_line_height)
-                num_part = page_str + suffix
-                baseline = y + entry_font_size * 0.85
-                page.insert_text((col_left() + 8, baseline), num_part, fontname=entry_fontname,
-                                  fontsize=entry_font_size, color=(0, 0, 0, 1))
-                x = col_left() + 8 + fitz.get_text_length(
-                    num_part, fontname=entry_fontname, fontsize=entry_font_size)
-                continue
+                fsize = entry_font_size * (col_width / tw) * 0.98
+                tw = col_width * 0.98
+            prepared.append((text, tw, fsize))
 
-            baseline = y + entry_font_size * 0.85
-            page.insert_text((x, baseline), token_full, fontname=entry_fontname,
-                              fontsize=entry_font_size, color=(0, 0, 0, 1))
-            x += tw
+        # 2) susun jadi baris-baris; total lebar per baris DIJAMIN <= col_width
+        lines = []
+        current, current_w = [], 0.0
+        for text, tw, fsize in prepared:
+            if current and current_w + tw > col_width:
+                lines.append(current)
+                current, current_w = [], 0.0
+            current.append((text, tw, fsize))
+            current_w += tw
+        if current:
+            lines.append(current)
+
+        # 3) gambar tiap baris. Baris terakhir grup huruf ini rata kiri biasa;
+        # baris lain (kalau berisi >1 entri) di-justify kalau justify_entries aktif.
+        for li, line_chunks in enumerate(lines):
+            ensure_space(entry_line_height)
+            is_last_line = (li == len(lines) - 1)
+            natural_w = sum(w for _, w, _ in line_chunks)
+            extra_gap = 0.0
+            if justify_entries and len(line_chunks) > 1 and not is_last_line:
+                extra_gap = max(0.0, (col_width - natural_w) / (len(line_chunks) - 1))
+            draw_line(line_chunks, y, extra_gap=extra_gap)
+            y += entry_line_height
 
         y += entry_line_height  # jarak sebelum grup huruf berikutnya
 
