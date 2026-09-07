@@ -421,116 +421,82 @@ def render_index_pdf(
 
 
 # =====================================================================================
-# 5) KONVERSI PDF RGB -> CMYK (Ghostscript — konversi warna sungguhan di content
-#    stream: rg/RG -> k/K, BUKAN sekadar menambah tag OutputIntent)
+# 5) KONVERSI PDF RGB -> CMYK — rumus GCR penuh langsung di operator warna
+#    (rg/RG/g/G -> k/K), deterministik, TANPA Ghostscript/profil ICC, supaya
+#    hasilnya konsisten di semua halaman dan warna primer tidak bocor silang.
 # =====================================================================================
 
-import os
-import shutil
-import subprocess
-import tempfile
-import time
+import io
+import re
+
+import pikepdf
 
 
 def is_ghostscript_available() -> bool:
-    return shutil.which("gs") is not None
+    # Dipertahankan agar halaman UI lama (yang mengecek fungsi ini sebelum
+    # mengizinkan konversi) tetap berjalan tanpa perlu diubah. Ghostscript
+    # sudah tidak dipakai lagi untuk convert_pdf_to_cmyk di bawah ini.
+    return True
 
-def _apply_full_gcr(pdf_bytes: bytes) -> bytes:
-    """Pasca-proses: pindahkan komponen abu-abu bersama dari C/M/Y ke K
-    (Full Gray Component Replacement). Ini mengubah 'rich black' bawaan
-    Ghostscript (mis. 0.72 0.68 0.67 0.88 k) menjadi nyaris pure K
-    (mis. 0.05 0.00 0.00 1.00 k), tanpa mengubah warna asli lain."""
-    pattern = re.compile(rb'([\d.]+)\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)\s+([kK])\b')
 
-    NEAR_BLACK_K = 0.90   # ambang K minimal supaya dianggap "ini hitam"
-    NEAR_ZERO_CMY = 0.06  # ambang sisa C/M/Y maksimal supaya dianggap "noise", bukan warna sungguhan
+def _rgb_to_cmyk(r: float, g: float, b: float):
+    c, m, y = 1 - r, 1 - g, 1 - b
+    k = min(c, m, y)
+    if k >= 1.0:
+        return 0.0, 0.0, 0.0, 1.0
+    return (c - k) / (1 - k), (m - k) / (1 - k), (y - k) / (1 - k), k
 
-    def repl(m):
-        c, mm, y, k = (float(m.group(i)) for i in range(1, 5))
-        gray = min(c, mm, y)
-        c2, m2, y2 = c - gray, mm - gray, y - gray
-        k2 = min(1.0, k + gray)
 
-        # Snap ke hitam murni HANYA kalau K sudah dominan dan sisa C/M/Y kecil
-        # sekali (noise konversi ICC) — warna asli seperti magenta/kuning tidak
-        # akan pernah lolos kedua syarat ini sekaligus, jadi aman tidak terpengaruh.
-        if k2 >= NEAR_BLACK_K and c2 <= NEAR_ZERO_CMY and m2 <= NEAR_ZERO_CMY and y2 <= NEAR_ZERO_CMY:
-            c2 = m2 = y2 = 0.0
-            k2 = 1.0
+_RGB_OP = re.compile(rb'([\d.]+)\s+([\d.]+)\s+([\d.]+)\s+(rg|RG)\b')
+_GRAY_OP = re.compile(rb'([\d.]+)\s+(g|G)\b')
 
-        return f"{c2:.4f} {m2:.4f} {y2:.4f} {k2:.4f} ".encode() + m.group(5)
 
+def _rgb_op_repl(m: "re.Match") -> bytes:
+    r, g, b = (float(m.group(i)) for i in range(1, 4))
+    c, mm, y, k = _rgb_to_cmyk(r, g, b)
+    newop = b"k" if m.group(4) == b"rg" else b"K"
+    return f"{c:.4f} {mm:.4f} {y:.4f} {k:.4f} ".encode() + newop
+
+
+def _gray_op_repl(m: "re.Match") -> bytes:
+    gray = float(m.group(1))
+    newop = b"k" if m.group(2) == b"g" else b"K"
+    return f"0.0000 0.0000 0.0000 {1 - gray:.4f} ".encode() + newop
+
+
+def convert_pdf_to_cmyk(pdf_bytes: bytes, timeout: int = 900, progress_callback=None) -> bytes:
+    """Konversi warna teks & vektor (operator rg/RG/g/G) dari RGB ke CMYK
+    secara langsung & deterministik (rumus GCR penuh), tanpa Ghostscript
+    atau profil ICC — supaya hasilnya konsisten di semua halaman dan warna
+    primer (hitam, cyan, magenta, kuning) tidak bocor ke kanal lain.
+
+    Catatan: ini mengonversi teks & elemen vektor. Gambar raster (foto/JPEG)
+    yang masih pakai colorspace RGB TIDAK ikut dikonversi fungsi ini.
+
+    timeout: dipertahankan untuk kompatibilitas pemanggil lama, tidak lagi
+        dipakai (proses ini murni Python, jauh lebih cepat daripada GS).
+    progress_callback: dipanggil dengan nomor halaman (int) setiap kali
+        satu halaman selesai diproses, untuk mengisi progress bar di UI.
+    """
     pdf = pikepdf.open(io.BytesIO(pdf_bytes))
-    for page in pdf.pages:
-        contents = page.obj.Contents
+
+    for i, page in enumerate(pdf.pages):
+        contents = page.obj.get("/Contents")
+        if contents is None:
+            continue
         if isinstance(contents, pikepdf.Array):
             buf = b"\n".join(bytes(s.read_bytes()) for s in contents)
         else:
             buf = bytes(contents.read_bytes())
-        page.obj.Contents = pdf.make_stream(pattern.sub(repl, buf))
+
+        buf = _RGB_OP.sub(_rgb_op_repl, buf)
+        buf = _GRAY_OP.sub(_gray_op_repl, buf)
+
+        page.obj.Contents = pdf.make_stream(buf)
+
+        if progress_callback:
+            progress_callback(i + 1)
 
     out = io.BytesIO()
     pdf.save(out)
     return out.getvalue()
-
-def convert_pdf_to_cmyk(pdf_bytes: bytes, timeout: int = 900, progress_callback=None) -> bytes:
-    """Konversi semua warna (teks, vektor, gambar) dalam PDF dari RGB ke CMYK
-    memakai Ghostscript, sesuai warna asli yang ada di PDF tersebut.
-
-    timeout: batas waktu total dalam detik (default 900 = 15 menit — PDF banyak
-        halaman/font kompleks seperti aksara Sunda bisa butuh waktu lebih lama
-        dari dugaan, terutama di server dengan CPU terbatas).
-    progress_callback: fungsi opsional dipanggil dengan nomor halaman (int)
-        setiap kali Ghostscript selesai memproses satu halaman, misal untuk
-        mengisi progress bar di UI.
-    """
-    if not is_ghostscript_available():
-        raise RuntimeError(
-            "Ghostscript ('gs') tidak ditemukan di server. Di Streamlit Community "
-            "Cloud: tambahkan file packages.txt berisi baris 'ghostscript' di root "
-            "repo lalu deploy ulang. Lokal: 'sudo apt install ghostscript' (Linux), "
-            "'brew install ghostscript' (Mac), atau unduh dari ghostscript.com (Windows)."
-        )
-    with tempfile.TemporaryDirectory() as tmp:
-        in_path = os.path.join(tmp, "in.pdf")
-        out_path = os.path.join(tmp, "out.pdf")
-        with open(in_path, "wb") as f:
-            f.write(pdf_bytes)
-        cmd = [
-            "gs", "-dNOPAUSE", "-dBATCH", "-dSAFER",
-            "-sDEVICE=pdfwrite",
-            "-sColorConversionStrategy=CMYK",
-            "-dProcessColorModel=/DeviceCMYK",
-            "-dOverrideICC=true",
-            "-dAutoRotatePages=/None",
-            f"-sOutputFile={out_path}",
-            in_path,
-        ]
-        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                                 text=True, bufsize=1)
-        start = time.time()
-        log_tail = []
-        for line in proc.stdout:
-            line = line.strip()
-            if line:
-                log_tail.append(line)
-                log_tail = log_tail[-30:]
-            if line.startswith("Page ") and progress_callback:
-                try:
-                    progress_callback(int(line.split()[1]))
-                except (IndexError, ValueError):
-                    pass
-            if time.time() - start > timeout:
-                proc.kill()
-                proc.wait(timeout=10)
-                raise RuntimeError(
-                    f"Konversi melebihi batas waktu {timeout} detik (PDF terlalu besar/"
-                    f"kompleks untuk waktu yang tersedia). Coba naikkan nilai timeout, "
-                    f"atau proses PDF dalam potongan halaman yang lebih kecil."
-                )
-        proc.wait(timeout=15)
-        if proc.returncode != 0 or not os.path.exists(out_path):
-            raise RuntimeError(f"Ghostscript gagal (kode {proc.returncode}):\n" + "\n".join(log_tail))
-        with open(out_path, "rb") as f:
-            cmyk_bytes = f.read()
-        return _apply_full_gcr(cmyk_bytes)
