@@ -278,6 +278,7 @@ def render_index_pdf(
     num_columns=3,
     column_gap=18,
     entry_separator=", ",
+    justify_entries=True,
     letter_header_enabled=True,
     letter_header_font="Arial (Helvetica)",
     letter_header_font_size=13,
