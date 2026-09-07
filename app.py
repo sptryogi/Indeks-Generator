@@ -67,6 +67,11 @@ with st.sidebar:
              "bikin kata+halaman kepanjangan tumpang tindih.",
     )
     num_columns = 4 if layout_mode == "4 Kolom" else 1
+    justify_entries = st.checkbox(
+        "Rata kanan-kiri (justify) antar-entri", value=True, key="justify_entries",
+        help="Baris yang berisi lebih dari satu entri akan direntangkan supaya "
+             "rata di kedua sisi, seperti kolom koran/kamus.",
+    )
 
     st.divider()
     st.subheader("Header abjad (A, B, C, ...)")
@@ -224,6 +229,7 @@ output_pdf_bytes = render_index_pdf(
     entry_font_size=entry_font_size,
     entry_bold=entry_bold,
     num_columns=num_columns,
+    justify_entries=justify_entries,
     letter_header_enabled=letter_header_enabled,
     letter_header_font=letter_header_font,
     letter_header_font_size=letter_header_font_size,
