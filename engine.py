@@ -440,6 +440,27 @@ def is_ghostscript_available() -> bool:
 
 
 def _rgb_to_cmyk(r: float, g: float, b: float):
+    # --- Snap RGB "hampir murni" cyan/magenta/yellow ke CMYK murni ---
+    # Banyak PDF menyimpan cyan bukan sebagai RGB(0,255,255) persis, tapi
+    # aproksimasi (mis. RGB(0,174,239)). Kalau langsung dihitung pakai rumus
+    # GCR biasa, aproksimasi ini bocor jadi ada M/Y sisa + K (mis. jadi
+    # C~100 M~27 K~6, bukan C100 M0 Y0 K0). Maka sebelum GCR, deteksi dulu
+    # pola "satu kanal RGB rendah, dua kanal lain tinggi & berdekatan nilainya"
+    # (atau sebaliknya untuk magenta/yellow) lalu paksa jadi primer CMYK murni.
+    PURE_LOW = 0.05         # kanal dianggap "nol" kalau di bawah ini
+    PURE_HIGH_MIN = 0.50    # dua kanal lain dianggap "tinggi/jenuh" kalau di atas ini
+    PURE_HIGH_DIFF = 0.45   # selisih maksimal yang ditoleransi antar dua kanal tinggi tsb
+
+    if (r <= PURE_LOW and g >= PURE_HIGH_MIN and b >= PURE_HIGH_MIN
+            and abs(g - b) <= PURE_HIGH_DIFF):
+        return 1.0, 0.0, 0.0, 0.0  # Cyan murni (C100 M0 Y0 K0)
+    if (g <= PURE_LOW and r >= PURE_HIGH_MIN and b >= PURE_HIGH_MIN
+            and abs(r - b) <= PURE_HIGH_DIFF):
+        return 0.0, 1.0, 0.0, 0.0  # Magenta murni (C0 M100 Y0 K0)
+    if (b <= PURE_LOW and r >= PURE_HIGH_MIN and g >= PURE_HIGH_MIN
+            and abs(r - g) <= PURE_HIGH_DIFF):
+        return 0.0, 0.0, 1.0, 0.0  # Yellow murni (C0 M0 Y100 K0)
+
     c, m, y = 1 - r, 1 - g, 1 - b
     k = min(c, m, y)
     if k >= 1.0:
