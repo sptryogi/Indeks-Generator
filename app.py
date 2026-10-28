@@ -73,6 +73,16 @@ with st.sidebar:
              "rata di kedua sisi, seperti kolom koran/kamus.",
     )
 
+    one_per_line = st.checkbox(
+        "Satu sublema per baris (tidak berdampingan)", value=False, key="one_per_line",
+        help="Setiap sublema + halamannya tampil di baris sendiri, "
+             "tidak digabung berdampingan dalam satu baris.",
+    )
+    bold_page_only = st.checkbox(
+        "Bold hanya nomor halaman", value=False, key="bold_page_only",
+        help="Kata sublema tetap normal, hanya nomor halamannya yang tebal.",
+    )
+
     st.divider()
     st.subheader("Header abjad (A, B, C, ...)")
     letter_header_enabled = st.checkbox("Tampilkan header abjad", value=True, key="lh_enabled")
@@ -241,6 +251,8 @@ output_pdf_bytes = render_index_pdf(
     page_number_font_size=page_number_font_size,
     page_number_prefix=page_number_prefix,
     page_number_suffix=page_number_suffix,
+    one_per_line=one_per_line,
+    bold_page_only=bold_page_only,
 )
 import pikepdf
 
