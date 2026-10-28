@@ -292,6 +292,8 @@ def render_index_pdf(
     page_number_font_size=9,
     page_number_prefix="",
     page_number_suffix="",
+    one_per_line=False,
+    bold_page_only=False,
 ) -> bytes:
     W, H = page_size
     ml, mt, mr, mb = margin
@@ -303,6 +305,7 @@ def render_index_pdf(
     entry_line_height = entry_font_size * line_height_ratio
     header_line_height = letter_header_font_size * line_height_ratio
     entry_fontname = FONT_BASE14[entry_font][entry_bold]
+    page_fontname = FONT_BASE14[entry_font][True if (entry_bold or bold_page_only) else False]
     title_fontname = FONT_BASE14[title_font][title_bold]
     header_fontname = FONT_BASE14[letter_header_font][letter_header_bold]
 
@@ -349,7 +352,13 @@ def render_index_pdf(
         cx = col_left()
         baseline = line_y + entry_font_size * 0.85
         for idx, (text, w, fsize) in enumerate(chunks):
-            page.insert_text((cx, baseline), text, fontname=entry_fontname,
+            # page.insert_text((cx, baseline), text, fontname=entry_fontname,
+            #                   fontsize=fsize, color=(0, 0, 0, 1))
+            word_part, page_part = text
+            page.insert_text((cx, baseline), word_part, fontname=entry_fontname,
+                              fontsize=fsize, color=(0, 0, 0, 1))
+            wx = cx + fitz.get_text_length(word_part, fontname=entry_fontname, fontsize=fsize)
+            page.insert_text((wx, baseline), page_part, fontname=page_fontname,
                               fontsize=fsize, color=(0, 0, 0, 1))
             cx += w
             if idx < len(chunks) - 1:
@@ -374,9 +383,11 @@ def render_index_pdf(
         prepared = []
         for i, (word, labels) in enumerate(items):
             page_str = ", ".join(labels)
+            # suffix = entry_separator if (i < len(items) - 1 and not one_per_line) else ""
             suffix = entry_separator if i < len(items) - 1 else ""
-            text = f"{word} {page_str}{suffix}"
-            tw = fitz.get_text_length(text, fontname=entry_fontname, fontsize=entry_font_size)
+            text = (f"{word} ", f"{page_str}{suffix}")  # (bagian kata, bagian halaman)
+            tw = (fitz.get_text_length(text[0], fontname=entry_fontname, fontsize=entry_font_size)
+                  + fitz.get_text_length(text[1], fontname=page_fontname, fontsize=entry_font_size))
             fsize = entry_font_size
             if tw > col_width:
                 fsize = entry_font_size * (col_width / tw) * 0.98
@@ -389,7 +400,7 @@ def render_index_pdf(
         lines = []
         current, current_w = [], 0.0
         for text, tw, fsize in prepared:
-            if current and current_w + tw > col_width:
+            if current and (one_per_line or current_w + tw > col_width):
                 lines.append(current)
                 current, current_w = [], 0.0
             current.append((text, tw, fsize))
