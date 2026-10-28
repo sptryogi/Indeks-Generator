@@ -262,7 +262,16 @@ def stamp_page_numbers(doc: "fitz.Document", page_size, margin, enabled: bool,
 # =====================================================================================
 # 4) RENDER PDF INDEKS — 1 KOLOM, TANPA HEADER ABJAD
 # =====================================================================================
+_FONT_CACHE = {}
 
+
+def text_width(text: str, fontname: str, fontsize: float) -> float:
+    """Pengganti fitz.get_text_length yang menghitung huruf beraksen (é, è, ê, ö)
+    dengan benar, supaya nomor halaman tidak menimpa ujung kata."""
+    if fontname not in _FONT_CACHE:
+        _FONT_CACHE[fontname] = fitz.Font(fontname)
+    return _FONT_CACHE[fontname].text_length(text, fontsize=fontsize)
+    
 def render_index_pdf(
     index_items,
     page_size=(595, 842),
@@ -357,7 +366,7 @@ def render_index_pdf(
             word_part, page_part = text
             page.insert_text((cx, baseline), word_part, fontname=entry_fontname,
                               fontsize=fsize, color=(0, 0, 0, 1))
-            wx = cx + fitz.get_text_length(word_part, fontname=entry_fontname, fontsize=fsize)
+            wx = cx + text_width(word_part, fontname=entry_fontname, fontsize=fsize)
             page.insert_text((wx, baseline), page_part, fontname=page_fontname,
                               fontsize=fsize, color=(0, 0, 0, 1))
             cx += w
@@ -386,8 +395,8 @@ def render_index_pdf(
             # suffix = entry_separator if (i < len(items) - 1 and not one_per_line) else ""
             suffix = entry_separator if i < len(items) - 1 else ""
             text = (f"{word} ", f"{page_str}{suffix}")  # (bagian kata, bagian halaman)
-            tw = (fitz.get_text_length(text[0], fontname=entry_fontname, fontsize=entry_font_size)
-                  + fitz.get_text_length(text[1], fontname=page_fontname, fontsize=entry_font_size))
+            tw = (text_width(text[0], fontname=entry_fontname, fontsize=entry_font_size)
+                  + text_width(text[1], fontname=page_fontname, fontsize=entry_font_size))
             fsize = entry_font_size
             if tw > col_width:
                 fsize = entry_font_size * (col_width / tw) * 0.98
